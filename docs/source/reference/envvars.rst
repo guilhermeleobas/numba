@@ -101,6 +101,11 @@ These variables influence what is printed out during compilation of
    If set to non-zero the issuing of performance warnings is disabled. Default
    is zero.
 
+.. envvar:: NUMBA_DIFF_IR
+
+   If set to non-zero, dump IR in such way as to aid "diff"ing. Default
+   is zero.
+
 .. envvar:: NUMBA_DEBUG
 
    If set to non-zero, print out all possible debugging information during
