@@ -503,6 +503,7 @@ class JITCodeLibrary(CodeLibrary):
               library.
             - non-zero if the symbol is defined.
         """
+        print('numba codegen.py::get_pointer_to_function')
         self._ensure_finalized()
         ee = self._codegen._engine
         if not ee.is_symbol_defined(name):
@@ -511,6 +512,7 @@ class JITCodeLibrary(CodeLibrary):
             return self._codegen._engine.get_function_address(name)
 
     def _finalize_specific(self):
+        print('numba codegen.py::_finalize_specific')
         self._codegen._scan_and_fix_unresolved_refs(self._final_module)
         self._codegen._engine.finalize_object()
 
@@ -635,6 +637,7 @@ class JitEngine(object):
 class BaseCPUCodegen(object):
 
     def __init__(self, module_name):
+        print('codegen.py::BaseCPUCodegen.__init__()')
         initialize_llvm()
 
         self._data_layout = None
@@ -685,6 +688,7 @@ class BaseCPUCodegen(object):
         Create a :class:`CodeLibrary` object for use with this codegen
         instance.
         """
+        print('codegen.py::create_library')
         return self._library_class(self, name)
 
     def unserialize_library(self, serialized):
@@ -863,6 +867,7 @@ class JITCPUCodegen(BaseCPUCodegen):
 
         Update the GlobalVariable named *env_name* to the address of *env*.
         """
+        print('numba codegen.py::set_env')
         gvaddr = self._engine.get_global_value_address(env_name)
         envptr = (ctypes.c_void_p * 1).from_address(gvaddr)
         envptr[0] = ctypes.c_void_p(id(env))

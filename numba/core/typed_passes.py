@@ -432,7 +432,8 @@ class NoPythonBackend(LoweringPass):
         Back-end: Generate LLVM IR from Numba IR, compile to machine code
         """
         if state.library is None:
-            codegen = state.targetctx.codegen()
+            codegen = state.targetctx.codegen() # codegen here is a CPUContext rather than a RemoteCPUContext
+            print('typed_passes.py::NoPythonBackend create_library', type(codegen), codegen)
             state.library = codegen.create_library(state.func_id.func_qualname)
             # Enable object caching upfront, so that the library can
             # be later serialized.
