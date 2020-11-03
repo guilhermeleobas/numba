@@ -1,0 +1,133 @@
+diff --git a/numba/core/dispatcher.py b/numba/core/dispatcher.py
+index bd5ac3a55..c3441675c 100644
+--- a/numba/core/dispatcher.py
++++ b/numba/core/dispatcher.py
+@@ -324,6 +324,7 @@ class _DispatcherBase(_dispatcher.Dispatcher):
+         Return the compiled function for the given signature.
+         """
+         args, return_type = sigutils.normalize_signature(sig)
++        from pudb import set_trace; set_trace()
+         return self.overloads[tuple(args)].entry_point
+ 
+     @property
+diff --git a/numba/core/typed_passes.py b/numba/core/typed_passes.py
+index e2cc3bf01..c45e27630 100644
+--- a/numba/core/typed_passes.py
++++ b/numba/core/typed_passes.py
+@@ -486,7 +486,7 @@ class InlineOverloads(FunctionPass):
+     def __init__(self):
+         FunctionPass.__init__(self)
+ 
+-    _DEBUG = False
++    _DEBUG = True
+ 
+     def run_pass(self, state):
+         """Run inlining of overloads
+@@ -631,6 +631,8 @@ class InlineOverloads(FunctionPass):
+ 
+     def _do_work_expr(self, state, work_list, block, i, expr, inline_worker):
+ 
++        from pudb import set_trace; set_trace()
++
+         def select_template(templates, args):
+             if templates is None:
+                 return None
+diff --git a/numba/core/typing/templates.py b/numba/core/typing/templates.py
+index a32e19a85..b5468085a 100644
+--- a/numba/core/typing/templates.py
++++ b/numba/core/typing/templates.py
+@@ -704,7 +704,7 @@ class _OverloadFunctionTemplate(AbstractTemplate):
+             On failure, returns `(None, None)`.
+ 
+         """
+-        from numba import jit
++        from numba import cuda, jit
+ 
+         # Get the overload implementation for the given types
+         ovf_result = self._overload_func(*args, **kws)
+@@ -733,11 +733,11 @@ class _OverloadFunctionTemplate(AbstractTemplate):
+         if self._strict:
+             self._validate_sigs(self._overload_func, pyfunc)
+         # Make dispatcher
+-        jitdecor = jit(nopython=True, **self._jit_options)
++        jitdecor = cuda.jit(device=True, **self._jit_options)
+         disp = jitdecor(pyfunc)
+         # Make sure that the implementation can be fully compiled
+         disp_type = types.Dispatcher(disp)
+-        disp_type.get_call_type(self.context, args, kws)
++        #disp_type.get_call_type(self.context, args, kws)
+         if cache_key is not None:
+             self._impl_cache[cache_key] = disp, args
+         return disp, args
+diff --git a/numba/cuda/compiler.py b/numba/cuda/compiler.py
+index 6d443585a..45243c30c 100644
+--- a/numba/cuda/compiler.py
++++ b/numba/cuda/compiler.py
+@@ -177,10 +177,38 @@ class DeviceFunctionTemplate(serialize.ReduceMixin):
+     def _reduce_states(self):
+         return dict(py_func=self.py_func, debug=self.debug, inline=self.inline)
+ 
++    def get_call_template(self, args, kws):
++        """
++        Get a typing.ConcreteTemplate for this dispatcher and the given
++        *args* and *kws* types.  This allows to resolve the return type.
++
++        A (template, pysig, args, kws) tuple is returned.
++
++        Copied / modified from numba.core.dispatcher.Dispatcher.
++        """
++        pysig = utils.pysignature(self.py_func)
++        kws = {}
++        # Ensure an overload is available
++        #if self._can_compile:
++        self.compile(tuple(args))
++
++        # Create function type for typing
++        func_name = self.py_func.__name__
++        name = "CallTemplate({0})".format(func_name)
++        # The `key` isn't really used except for diagnosis here,
++        # so avoid keeping a reference to `cfunc`.
++        call_template = typing.make_concrete_template(
++            name, key=func_name, signatures=self.nopython_signatures)
++        return call_template, pysig, args, kws
++
+     @classmethod
+     def _rebuild(cls, py_func, debug, inline):
+         return compile_device_template(py_func, debug=debug, inline=inline)
+ 
++    @property
++    def nopython_signatures(self):
++        return [cres.signature for cres in self._compileinfos.values()]
++
+     def compile(self, args):
+         """Compile the function for the given argument types.
+ 
+@@ -189,12 +217,14 @@ class DeviceFunctionTemplate(serialize.ReduceMixin):
+ 
+         Returns the `CompileResult`.
+         """
++        from pudb import set_trace; set_trace()
+         if args not in self._compileinfos:
+             cres = compile_cuda(self.py_func, None, args, debug=self.debug,
+                                 inline=self.inline)
+             first_definition = not self._compileinfos
+-            self._compileinfos[args] = cres
+             libs = [cres.library]
++            cres = cres._replace(entry_point=self.py_func)
++            self._compileinfos[args] = cres
+ 
+             if first_definition:
+                 # First definition
+@@ -208,6 +238,12 @@ class DeviceFunctionTemplate(serialize.ReduceMixin):
+ 
+         return cres
+ 
++    def get_overload(self, sig):
++        args, return_type = sigutils.normalize_signature(sig)
++        #cres = self._compileinfos[tuple(args)]
++        #from pudb import set_trace; set_trace
++        return self._compileinfos[tuple(args)].entry_point
++
+     def inspect_llvm(self, args):
+         """Returns the LLVM-IR text compiled for *args*.
+ 
