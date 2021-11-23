@@ -4,9 +4,11 @@ from copy import deepcopy, copy
 import warnings
 
 from numba.core.compiler_machinery import (FunctionPass, AnalysisPass,
-                                           register_pass)
+                                           register_pass,
+                                           PassManager)
 from numba.core import (errors, types, ir, bytecode, postproc, rewrites, config,
                         transforms)
+from numba.core.typed_passes import PartialTypeInference
 from numba.misc.special import literal_unroll
 from numba.core.analysis import (dead_branch_prune, rewrite_semantic_constants,
                                  find_literally_calls, compute_cfg_from_blocks,
@@ -1535,3 +1537,47 @@ class ReconstructSSA(FunctionPass):
                 typ = locals_dict[parent]
                 for derived in redefs:
                     locals_dict[derived] = typ
+
+
+@register_pass(mutates_CFG=True, analysis_only=False)
+class DeadLoopElimination(FunctionPass):
+    _name = "dead_loop_elimination"
+
+    def __init__(self):
+        FunctionPass.__init__(self)
+
+    def is_dead_loop(self, state, loop):
+        func_ir = state.func_ir
+        header = func_ir.blocks[loop.header]
+        iternext = header.body[0].value
+        if isinstance(iternext, ir.Expr) and iternext.op == 'iternext':
+            getiter = guard(get_definition, state.func_ir, iternext.value.name)
+            if not getiter:
+                return False
+            ty = state.typemap.get(getiter.value.name, False)
+            if ty is not None and \
+                    isinstance(ty, types.ConstSized) and \
+                    len(ty) == 0:
+                return True
+        return False
+
+    def run_pass(self, state):
+        pm = PassManager("PTI")
+        pm.add_pass(GenericRewrites, "Generic Rewrites")
+        pm.add_pass(RewriteSemanticConstants, "Semantic const")
+        pm.add_pass(DeadBranchPrune, "Dead branch prune")
+        pm.add_pass(PartialTypeInference, "performs partial type inference")
+        pm.finalize()
+        pm.run(state)
+
+        mutated = False
+        func_ir = state.func_ir
+        dead = []
+        cfg = compute_cfg_from_blocks(func_ir.blocks)
+        loops = cfg.loops()
+
+        for loop in loops.values():
+            if self.is_dead_loop(state, loop):
+                dead.append(loop)
+
+        return mutated
