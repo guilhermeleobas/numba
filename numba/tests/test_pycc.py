@@ -1,5 +1,5 @@
 import contextlib
-import imp
+import importlib
 import os
 import shutil
 import subprocess
@@ -165,7 +165,7 @@ class TestCC(BasePYCCTest):
         super(TestCC, self).setUp()
         from numba.tests import compile_with_pycc
         self._test_module = compile_with_pycc
-        imp.reload(self._test_module)
+        importlib.reload(self._test_module)
 
     @contextlib.contextmanager
     def check_cc_compiled(self, cc):
@@ -314,7 +314,7 @@ class TestCC(BasePYCCTest):
             self.assertPreciseEqual(res, hash("A"))
             res = lib.hash_str("A")
             self.assertPreciseEqual(res, hash("A"))
-            
+
             code = """if 1:
                 from numpy.testing import assert_equal
                 res = lib.hash_literal_str_A()

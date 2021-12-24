@@ -1,16 +1,25 @@
-from distutils import dir_util, log
+from distutils import dir_util
 from distutils.command import build_ext
 from distutils.extension import Extension
 import os
 import shutil
 import sys
 import tempfile
+import logging
+
+from numba.cloudpickle import CloudPickler
+import multiprocessing as mp
+mp.reduction.ForkingPickler = CloudPickler
+import concurrent.futures
 
 from numba.core import typing, sigutils
 from numba.core.compiler_lock import global_compiler_lock
 from numba.pycc.compiler import ModuleCompiler, ExportEntry
 from numba.pycc.platform import Toolchain
 from numba import cext
+
+
+_logger = logging.getLogger(__name__)
 
 
 extension_libs = cext.get_extension_libs()
@@ -190,17 +199,54 @@ class CC(object):
                                                   extra_cflags=extra_cflags)
         return objects
 
-    @global_compiler_lock
-    def _compile_object_files(self, build_dir):
-        compiler = ModuleCompiler(self._export_entries, self._basename,
-                                self._use_nrt, cpu_name=self._target_cpu)
+    # @global_compiler_lock
+    def _compile_object_file(self, build_dir, entry):
+        compiler = ModuleCompiler([entry], self._basename,
+                                  use_nrt=False, cpu_name=self._target_cpu)
         compiler.external_init_function = self._init_function
-        temp_obj = os.path.join(build_dir,
-                                os.path.splitext(self._output_file)[0] + '.o')
-        log.info("generating LLVM code for '%s' into %s",
-                self._basename, temp_obj)
-        compiler.write_native_object(temp_obj, wrap=True)
-        return [temp_obj], compiler.dll_exports
+        temp_obj = tempfile.NamedTemporaryFile(dir=build_dir, suffix='.o').name
+        _logger.info("generating LLVM code for '%s' into %s",
+                     entry, temp_obj)
+        compiler.write_native_object(temp_obj, wrap=False)
+        return [temp_obj], compiler.dll_exports, compiler
+
+    def _emit_python_wrapper(self, build_dir, compilers):
+        compiler = ModuleCompiler(self._export_entries, self._basename, use_nrt=False,
+                                  cpu_name=self._target_cpu)
+        temp_obj = tempfile.NamedTemporaryFile(dir=build_dir, suffix='.o').name
+        _logger.info("generating LLVM code for python wrapper into %s",
+                     temp_obj)
+        for c in compilers:
+            compiler.exported_function_types.update(c.exported_function_types)
+            compiler.function_environments.update(c.function_environments)
+            compiler.environment_gvs.update(c.environment_gvs)
+        compiler.emit_python_wrapper_as_object(temp_obj)
+        return [temp_obj]
+
+    # @global_compiler_lock
+    def _compile_object_files(self, build_dir):
+        objects = []
+        dll_exports = []
+        compilers = []
+        if 1:
+            for entry in self._export_entries:
+                obj, dll, c = self._compile_object_file(build_dir, entry)
+                objects += obj
+                dll_exports += dll
+                compilers.append(c)
+        else:
+            with concurrent.futures.ProcessPoolExecutor(max_workers=20) as executor:
+                fs = []
+                for entry in self._export_entries:
+                    job = executor.submit(self._compile_object_file, build_dir, entry)
+                    fs.append(job)
+                done, _ = concurrent.futures.wait(fs)
+                for r in done:
+                    obj, dll = r.result()
+                    objects += obj
+                    dll_exports += dll
+
+        return objects, dll_exports, compilers
 
     @global_compiler_lock
     def compile(self):
@@ -211,10 +257,13 @@ class CC(object):
         build_dir = tempfile.mkdtemp(prefix='pycc-build-%s-' % self._basename)
 
         # Compile object file
-        objects, dll_exports = self._compile_object_files(build_dir)
+        objects, dll_exports, compilers = self._compile_object_files(build_dir)
 
-        # Compile mixins
+        # Compile mixins + nrt
         objects += self._compile_mixins(build_dir)
+
+        # emit python wrapper
+        objects += self._emit_python_wrapper(build_dir, compilers)
 
         # Then create shared library
         extra_ldflags = self._get_extra_ldflags()

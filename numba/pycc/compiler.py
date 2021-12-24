@@ -116,6 +116,9 @@ class _ModuleCompiler(object):
         self.typing_context = cpu_target.typing_context
         self.context = cpu_target.target_context.with_aot_codegen(
             self.module_name, **aot_options)
+        self.exported_function_types = {}
+        self.function_environments = {}
+        self.environment_gvs = {}
 
     def _mangle_method_symbol(self, func_name):
         return "._pycc_method_%s" % (func_name,)
@@ -130,54 +133,55 @@ class _ModuleCompiler(object):
         """Read all the exported functions/modules in the translator
         environment, and join them into a single LLVM module.
         """
-        self.exported_function_types = {}
-        self.function_environments = {}
-        self.environment_gvs = {}
-
         codegen = self.context.codegen()
         library = codegen.create_library(self.module_name)
 
         # Generate IR for all exported functions
         flags = Flags()
         flags.no_compile = True
+        # nrt is built together with mixins at a later stage
+        flags.nrt = False
         if not self.export_python_wrap:
             flags.no_cpython_wrapper = True
             flags.no_cfunc_wrapper = True
-        if self.use_nrt:
-            flags.nrt = True
-            # Compile NRT helpers
-            nrt_module, _ = nrtdynmod.create_nrt_module(self.context)
-            library.add_ir_module(nrt_module)
 
         for entry in self.export_entries:
             cres = compile_extra(self.typing_context, self.context,
-                                entry.function,
-                                entry.signature.args,
-                                entry.signature.return_type, flags,
-                                locals={}, library=library)
+                                 entry.function,
+                                 entry.signature.args,
+                                 entry.signature.return_type, flags,
+                                 locals={}, library=library)
 
             func_name = cres.fndesc.llvm_func_name
             llvm_func = cres.library.get_function(func_name)
+            llvm_func.name = entry.symbol
+            self.dll_exports.append(entry.symbol)
 
-            if self.export_python_wrap:
-                llvm_func.linkage = lc.LINKAGE_INTERNAL
-                wrappername = cres.fndesc.llvm_cpython_wrapper_name
-                wrapper = cres.library.get_function(wrappername)
-                wrapper.name = self._mangle_method_symbol(entry.symbol)
-                wrapper.linkage = lc.LINKAGE_EXTERNAL
-                fnty = cres.target_context.call_conv.get_function_type(
-                    cres.fndesc.restype, cres.fndesc.argtypes)
-                self.exported_function_types[entry] = fnty
-                self.function_environments[entry] = cres.environment
-                self.environment_gvs[entry] = cres.fndesc.env_name
-            else:
-                llvm_func.name = entry.symbol
-                self.dll_exports.append(entry.symbol)
+            fnty = cres.target_context.call_conv.get_function_type(
+                cres.fndesc.restype, cres.fndesc.argtypes)
+            self.exported_function_types[entry] = fnty
+            self.function_environments[entry] = cres.environment
+            self.environment_gvs[entry] = cres.fndesc.env_name
 
-        if self.export_python_wrap:
-            wrapper_module = library.create_ir_module("wrapper")
-            self._emit_python_wrapper(wrapper_module)
-            library.add_ir_module(wrapper_module)
+            # if self.export_python_wrap:
+            #     llvm_func.linkage = lc.LINKAGE_INTERNAL
+            #     wrappername = cres.fndesc.llvm_cpython_wrapper_name
+            #     wrapper = cres.library.get_function(wrappername)
+            #     wrapper.name = self._mangle_method_symbol(entry.symbol)
+            #     wrapper.linkage = lc.LINKAGE_EXTERNAL
+            #     fnty = cres.target_context.call_conv.get_function_type(
+            #         cres.fndesc.restype, cres.fndesc.argtypes)
+            #     self.exported_function_types[entry] = fnty
+            #     self.function_environments[entry] = cres.environment
+            #     self.environment_gvs[entry] = cres.fndesc.env_name
+            # else:
+            #     llvm_func.name = entry.symbol
+            #     self.dll_exports.append(entry.symbol)
+
+        # if self.export_python_wrap:
+        #     wrapper_module = library.create_ir_module("wrapper")
+        #     self._emit_python_wrapper(wrapper_module)
+        #     library.add_ir_module(wrapper_module)
 
         # Hide all functions in the DLL except those explicitly exported
         library.finalize()
@@ -386,7 +390,6 @@ class ModuleCompiler(_ModuleCompiler):
         Return the name and signature of the module's initialization function.
         """
         signature = lc.Type.function(lt._pyobject_head_p, ())
-
         return signature, "PyInit_" + self.module_name
 
     def _emit_python_wrapper(self, llvm_module):
@@ -462,3 +465,15 @@ class ModuleCompiler(_ModuleCompiler):
 
         self.dll_exports.append(mod_init_fn.name)
 
+    def emit_python_wrapper_as_object(self, output):
+        codegen = self.context.codegen()
+        library = codegen.create_library(self.module_name)
+
+        _, module_name = self.module_init_definition
+
+        llvm_module = library.create_ir_module(module_name)
+        self._emit_python_wrapper(llvm_module)
+        library.add_ir_module(llvm_module)
+
+        with open(output, 'wb') as fout:
+            fout.write(library.emit_native_object())

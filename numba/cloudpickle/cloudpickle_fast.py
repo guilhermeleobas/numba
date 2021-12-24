@@ -576,6 +576,14 @@ class CloudPickler(Pickler):
             else:
                 raise
 
+    @staticmethod
+    def dumps(obj):
+        return dumps(obj)
+
+    @staticmethod
+    def loads(obj):
+        return loads(obj)
+
     if pickle.HIGHEST_PROTOCOL >= 5:
         # `CloudPickler.dispatch` is only left for backward compatibility - note
         # that when using protocol 5, `CloudPickler.dispatch` is not an
