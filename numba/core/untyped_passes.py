@@ -1723,3 +1723,38 @@ class ReconstructSSA(FunctionPass):
                 typ = locals_dict[parent]
                 for derived in redefs:
                     locals_dict[derived] = typ
+
+
+@register_pass(mutates_CFG=True, analysis_only=False)
+class ConstExprProcessing(FunctionPass):
+    """
+    """
+    _name = "handle @constexpr decorators"
+
+    def __init__(self):
+        FunctionPass.__init__(self)
+
+    def run_pass(self, state):
+        from numba.core.extending import ConstExpr
+        func_ir = state.func_ir
+        mutated = False
+
+        func_ir.dump()
+        for _, blk in func_ir.blocks.items():
+            for stmt in blk.body:
+                if isinstance(stmt.value, ir.Global) and \
+                        isinstance(stmt.value.value, ConstExpr):
+
+                    defn = stmt.value
+                    loc = defn.loc
+                    breakpoint()
+                    expr = ir.Expr.make_function(defn.value.name,
+                                                 defn.value.func.__code__,
+                                                 None,
+                                                 None,
+                                                 loc)
+                    stmt.value = expr
+                    # blk.remove(assign)
+        func_ir.dump()
+
+        return mutated

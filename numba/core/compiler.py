@@ -18,6 +18,7 @@ from numba.core.untyped_passes import (ExtractByteCode, TranslateByteCode,
                                        WithLifting, InlineInlinables,
                                        FindLiterallyCalls,
                                        MakeFunctionToJitFunction,
+                                       ConstExprProcessing,
                                        CanonicalizeLoopExit,
                                        CanonicalizeLoopEntry, LiteralUnroll,
                                        ReconstructSSA,
@@ -598,6 +599,7 @@ class DefaultPassBuilder(object):
             pm.add_pass(FixupArgs, "fix up args")
         pm.add_pass(IRProcessing, "processing IR")
         pm.add_pass(WithLifting, "Handle with contexts")
+        pm.add_pass(ConstExprProcessing, "Handle @constexpr decorators")
 
         # inline closures early in case they are using nonlocal's
         # see issue #6585.

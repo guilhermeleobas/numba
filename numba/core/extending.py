@@ -570,6 +570,20 @@ class BoundLiteralArgs(collections.namedtuple(
         )
 
 
+class ConstExpr:
+    def __init__(self, func, name):
+        self.func = func
+        self.name = name
+
+    def __repr__(self):
+        return f'<ConstExpr {self.name}>'
+
+
+def constexpr(func):
+    name = getattr(func, '__name__', str(func))
+    return ConstExpr(func, name)
+
+
 def is_jitted(function):
     """Returns True if a function is wrapped by one of the Numba @jit
     decorators, for example: numba.jit, numba.njit

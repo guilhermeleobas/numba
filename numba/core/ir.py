@@ -862,6 +862,8 @@ class Assign(Stmt):
     def __str__(self):
         return '%s = %s' % (self.target, self.value)
 
+    __repr__ = __str__
+
 
 class Print(Stmt):
     """
@@ -980,6 +982,8 @@ class Global(EqualityCheckMixin, AbstractRHS):
 
     def __str__(self):
         return 'global(%s: %s)' % (self.name, self.value)
+
+    __repr__ = __str__
 
     def infer_constant(self):
         return self.value
