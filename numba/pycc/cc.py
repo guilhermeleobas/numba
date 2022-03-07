@@ -2,16 +2,13 @@ from distutils import dir_util, log
 from distutils.command import build_ext
 from distutils.extension import Extension
 import os
-import errno
-import pickle
 import shutil
 import sys
 import tempfile
-import pathlib
 
 from numba.core import typing, sigutils
 from numba.core.compiler_lock import global_compiler_lock
-from numba.pycc.compiler import ModuleCompiler, ExportEntry, ParallelModuleCompiler
+from numba.pycc.compiler import ModuleCompiler, ExportEntry
 from numba.pycc.platform import Toolchain
 from numba import cext
 
@@ -44,7 +41,7 @@ class CC(object):
         # 'posix': ['-flto'],
         }
 
-    def __init__(self, extension_name, source_module=None, output_dir=None):
+    def __init__(self, extension_name, source_module=None):
         if '.' in extension_name:
             raise ValueError("basename should be a simple module name, not "
                              "qualified name")
@@ -68,7 +65,7 @@ class CC(object):
         self._toolchain = Toolchain()
         self._verbose = False
         # By default, output in directory of caller module
-        self._output_dir = output_dir or os.path.dirname(self._source_path)
+        self._output_dir = os.path.dirname(self._source_path)
         self._output_file = self._toolchain.get_ext_filename(extension_name)
         self._use_nrt = True
         self._target_cpu = ''
@@ -230,80 +227,6 @@ class CC(object):
                                     extra_ldflags=extra_ldflags)
 
         shutil.rmtree(build_dir)
-
-    @global_compiler_lock
-    def emit_object_file(self, filename):
-        """
-        Compile the extension module into LLVM IR
-        """
-        compiler = ParallelModuleCompiler(self._export_entries,
-                                         self._basename,
-                                         use_nrt=False, #self._use_nrt,
-                                         cpu_name=self._target_cpu,
-                                         filename=filename)
-        compiler.external_init_function = self._init_function
-        # build_dir = tempfile.mkdtemp(prefix='pycc-build-%s-' % self._basename)
-        build_dir = os.getcwd()
-        temp_obj = os.path.join(build_dir, filename)
-        log.info("generating LLVM code for '%s' into %s",
-                self._basename, temp_obj)
-        compiler.write_native_object(temp_obj, wrap=False)
-
-    def _compile_python_wrapper(self, files, build_dir):
-        compiler = ParallelModuleCompiler(self._export_entries,
-                                          self._basename,
-                                          use_nrt=False, #self._use_nrt,
-                                          cpu_name=self._target_cpu,
-                                          external_init_function=self._init_function)
-        compiler._emit_nrt_module()
-
-        def get_path(file):
-            path = os.path.abspath(file)
-            if not os.path.exists(path):
-                raise FileNotFoundError(errno.ENOENT,
-                                        os.strerror(errno.ENOENT),
-                                        file)
-            return path
-
-        objects = []
-        for file in files:
-            objects += [get_path(file)]
-
-            # read pickle information
-            with pathlib.Path(file).with_suffix('.pickle').resolve().open('rb') as f:
-                pickled = pickle.load(f)
-
-            compiler.exported_function_types = {**compiler.exported_function_types, **pickled['exported_function_types']}
-            compiler.function_environments = {**compiler.function_environments, **pickled['function_environments']}
-            compiler.environment_gvs = {**compiler.environment_gvs, **pickled['environment_gvs']}
-            compiler.export_entries += pickled['export_entries']
-
-        wrapper_mod = compiler.library.create_ir_module("wrapper")
-        compiler._emit_python_wrapper(wrapper_mod)
-        compiler.library.add_ir_module(wrapper_mod)
-
-        temp_dir = tempfile.mkdtemp(prefix='pycc-build-%s-' % self._basename)
-        temp_obj = os.path.join(temp_dir, 'wrapper.o')
-        with open(temp_obj, 'wb') as fout:
-            fout.write(compiler.library.emit_native_object())
-        return objects + [temp_obj], compiler.dll_exports
-
-    @global_compiler_lock
-    def merge_object_files(self, files):
-        objects, dll_exports = self._compile_python_wrapper(files, self._output_dir)
-
-        temp_dir = tempfile.mkdtemp(prefix='pycc-build-%s-' % self._basename)
-        objects += self._compile_mixins(temp_dir)
-
-        extra_ldflags = self._get_extra_ldflags()
-        output_dll = os.path.join(self._output_dir, self._output_file)
-        libraries = self._toolchain.get_python_libraries()
-        library_dirs = self._toolchain.get_python_library_dirs()
-        self._toolchain.link_shared(output_dll, objects,
-                                    libraries, library_dirs,
-                                    export_symbols=dll_exports,
-                                    extra_ldflags=extra_ldflags)
-
 
     def distutils_extension(self, **kwargs):
         """

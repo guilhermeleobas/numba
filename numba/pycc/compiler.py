@@ -3,8 +3,6 @@
 import logging
 import os
 import sys
-import pickle
-import pathlib
 
 from llvmlite import ir
 from llvmlite.binding import Linkage
@@ -106,24 +104,18 @@ class _ModuleCompiler(object):
     env_def_ptr = lc.Type.pointer(env_def_ty)
 
     def __init__(self, export_entries, module_name, use_nrt=False,
-                 external_init_function=None, **aot_options):
+                 **aot_options):
         self.module_name = module_name
         self.export_python_wrap = False
         self.dll_exports = []
         self.export_entries = export_entries
         # Used by the CC API but not the legacy API
-        self.external_init_function = external_init_function
+        self.external_init_function = None
         self.use_nrt = use_nrt
-
-        self.exported_function_types = {}
-        self.function_environments = {}
-        self.environment_gvs = {}
 
         self.typing_context = cpu_target.typing_context
         self.context = cpu_target.target_context.with_aot_codegen(
             self.module_name, **aot_options)
-        self.codegen = self.context.codegen()
-        self.library = self.codegen.create_library(self.module_name)
 
     def _mangle_method_symbol(self, func_name):
         return "._pycc_method_%s" % (func_name,)
@@ -138,6 +130,13 @@ class _ModuleCompiler(object):
         """Read all the exported functions/modules in the translator
         environment, and join them into a single LLVM module.
         """
+        self.exported_function_types = {}
+        self.function_environments = {}
+        self.environment_gvs = {}
+
+        codegen = self.context.codegen()
+        library = codegen.create_library(self.module_name)
+
         # Generate IR for all exported functions
         flags = Flags()
         flags.no_compile = True
@@ -148,14 +147,14 @@ class _ModuleCompiler(object):
             flags.nrt = True
             # Compile NRT helpers
             nrt_module, _ = nrtdynmod.create_nrt_module(self.context)
-            self.library.add_ir_module(nrt_module)
+            library.add_ir_module(nrt_module)
 
         for entry in self.export_entries:
             cres = compile_extra(self.typing_context, self.context,
-                                 entry.function,
-                                 entry.signature.args,
-                                 entry.signature.return_type, flags,
-                                 locals={}, library=self.library)
+                                entry.function,
+                                entry.signature.args,
+                                entry.signature.return_type, flags,
+                                locals={}, library=library)
 
             func_name = cres.fndesc.llvm_func_name
             llvm_func = cres.library.get_function(func_name)
@@ -176,20 +175,20 @@ class _ModuleCompiler(object):
                 self.dll_exports.append(entry.symbol)
 
         if self.export_python_wrap:
-            wrapper_module = self.library.create_ir_module("wrapper")
+            wrapper_module = library.create_ir_module("wrapper")
             self._emit_python_wrapper(wrapper_module)
-            self.library.add_ir_module(wrapper_module)
+            library.add_ir_module(wrapper_module)
 
         # Hide all functions in the DLL except those explicitly exported
-        self.library.finalize()
-        for fn in self.library.get_defined_functions():
+        library.finalize()
+        for fn in library.get_defined_functions():
             if fn.name not in self.dll_exports:
                 if fn.linkage in {Linkage.private, Linkage.internal}:
                     # Private/Internal linkage must have "default" visibility
                     fn.visibility = "default"
                 else:
                     fn.visibility = 'hidden'
-        return self.library
+        return library
 
     def write_llvm_bitcode(self, output, wrap=False, **kws):
         self.export_python_wrap = wrap
@@ -463,84 +462,3 @@ class ModuleCompiler(_ModuleCompiler):
 
         self.dll_exports.append(mod_init_fn.name)
 
-
-class ParallelModuleCompiler(ModuleCompiler):
-    def __init__(self, export_entries, module_name, use_nrt=False,
-                 external_init_function=None, filename=None,
-                 **aot_options):
-        self.filename = filename
-        super().__init__(export_entries, module_name, use_nrt, external_init_function, **aot_options)
-
-    def _emit_nrt_module(self):
-        flags = Flags()
-        flags.no_compile = True
-        flags.nrt = True
-        nrt_module, _ = nrtdynmod.create_nrt_module(self.context)
-        self.library.add_ir_module(nrt_module)
-
-    @global_compiler_lock
-    def _cull_exports(self):
-        """Read all the exported functions/modules in the translator
-        environment, and join them into a single LLVM module.
-        """
-        # Generate IR for all exported functions
-        flags = Flags()
-        flags.no_compile = True
-        if self.use_nrt:
-            flags.nrt = True
-            # Compile NRT helpers
-            nrt_module, _ = nrtdynmod.create_nrt_module(self.context)
-            self.library.add_ir_module(nrt_module)
-
-        # parallel compilation for a single translation unit
-        assert len(self.export_entries) == 1
-
-        for entry in self.export_entries:
-            function = entry.function
-            entry.function = None
-            cres = compile_extra(self.typing_context, self.context,
-                                 function,
-                                 entry.signature.args,
-                                 entry.signature.return_type, flags,
-                                 locals={}, library=self.library)
-
-            func_name = cres.fndesc.llvm_func_name
-            llvm_func = cres.library.get_function(func_name)
-
-            # if self.export_python_wrap:
-            llvm_func.linkage = lc.LINKAGE_INTERNAL
-            wrappername = cres.fndesc.llvm_cpython_wrapper_name
-            wrapper = cres.library.get_function(wrappername)
-            wrapper.name = self._mangle_method_symbol(entry.symbol)
-            wrapper.linkage = lc.LINKAGE_EXTERNAL
-            fnty = cres.target_context.call_conv.get_function_type(
-                cres.fndesc.restype, cres.fndesc.argtypes)
-            self.exported_function_types[entry] = fnty
-            self.function_environments[entry] = cres.environment
-            self.environment_gvs[entry] = cres.fndesc.env_name
-
-        if self.export_python_wrap:
-            wrapper_module = self.library.create_ir_module("wrapper")
-            self._emit_python_wrapper(wrapper_module)
-            self.library.add_ir_module(wrapper_module)
-
-        if not self.export_python_wrap:
-            d = {
-                'exported_function_types': self.exported_function_types,
-                'function_environments': self.function_environments,
-                'environment_gvs': self.environment_gvs,
-                'export_entries': self.export_entries,
-            }
-            with pathlib.Path(self.filename).with_suffix('.pickle').open('wb') as f:
-                pickle.dump(d, f)
-
-        # Hide all functions in the DLL except those explicitly exported
-        self.library.finalize()
-        for fn in self.library.get_defined_functions():
-            if fn.name not in self.dll_exports:
-                if fn.linkage in {Linkage.private, Linkage.internal}:
-                    # Private/Internal linkage must have "default" visibility
-                    fn.visibility = "default"
-                else:
-                    fn.visibility = 'hidden'
-        return self.library
