@@ -141,7 +141,6 @@ class ParallelCC(CC):
             filename=filename,
         )
         compiler.external_init_function = self._init_function
-        # build_dir = tempfile.mkdtemp(prefix='pycc-build-%s-' % self._basename)
         build_dir = os.getcwd()
         temp_obj = os.path.join(build_dir, filename)
         log.info("generating LLVM code for '%s' into %s", self._basename, temp_obj)
@@ -216,9 +215,6 @@ class ParallelCC(CC):
         )
 
 
-cc = ParallelCC("my_module", output_dir=os.getcwd())
-
-
 def make_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -266,6 +262,14 @@ def make_parser():
         dest="files",
         help="list of llvm IR files to be merged",
     )
+    parser_merge.add_argument(
+        "-o",
+        action="store",
+        type=str,
+        required=False,
+        default="my_module",
+        help="Name of the library file",
+    )
 
     return parser
 
@@ -292,9 +296,11 @@ def main():
                 fn = getattr(module, fn_name)
             except AttributeError:
                 raise ImportError(f"function {fn_name} not found in {module.__name__}")
+            cc = ParallelCC("my_module", output_dir=os.getcwd())
             cc.export(exported_name, sig)(fn)
             cc.emit_object_file(args.o)
         elif args.kind == "merge":
+            cc = ParallelCC(args.o.strip('.so'), output_dir=os.getcwd())
             cc.merge_object_files(args.files)
         else:
             raise RuntimeError
