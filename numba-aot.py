@@ -141,8 +141,7 @@ class ParallelCC(CC):
             filename=filename,
         )
         compiler.external_init_function = self._init_function
-        build_dir = os.getcwd()
-        temp_obj = os.path.join(build_dir, filename)
+        temp_obj = str(pathlib.Path(filename).resolve())
         log.info("generating LLVM code for '%s' into %s", self._basename, temp_obj)
         compiler.write_native_object(temp_obj, wrap=False)
 
@@ -157,10 +156,10 @@ class ParallelCC(CC):
         compiler._emit_nrt_module()
 
         def get_path(file):
-            path = os.path.abspath(file)
-            if not os.path.exists(path):
+            path = pathlib.Path(file)
+            if not path.exists():
                 raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), file)
-            return path
+            return str(path)
 
         objects = []
         for file in files:
@@ -221,7 +220,7 @@ def make_parser():
         "filename", action="store", nargs="?", help="Python source filename"
     )
     sub_parsers = parser.add_subparsers(help="Numba AOT help", dest="kind")
-    parser_llvm = sub_parsers.add_parser("emit-obj", help="emit-obj")
+    parser_llvm = sub_parsers.add_parser("emit-obj", help="emit object file")
     parser_merge = sub_parsers.add_parser("merge", help="merge object files (*.o)")
 
     parser_llvm.add_argument(
@@ -296,11 +295,13 @@ def main():
                 fn = getattr(module, fn_name)
             except AttributeError:
                 raise ImportError(f"function {fn_name} not found in {module.__name__}")
-            cc = ParallelCC("my_module", output_dir=os.getcwd())
+            p = pathlib.Path(args.o)
+            cc = ParallelCC("my_module", output_dir=p.parent)
             cc.export(exported_name, sig)(fn)
             cc.emit_object_file(args.o)
         elif args.kind == "merge":
-            cc = ParallelCC(args.o.strip('.so'), output_dir=os.getcwd())
+            p = pathlib.Path(args.o)
+            cc = ParallelCC(p.stem, output_dir=p.parent)
             cc.merge_object_files(args.files)
         else:
             raise RuntimeError
