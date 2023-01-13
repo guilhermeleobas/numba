@@ -1,3 +1,9 @@
+"""
+"""
+
+__all__ = ["deshaw_jit"]
+
+
 from typing import Callable
 from numba.core.target_extension import CPU, dispatcher_registry, target_registry
 from numba.core.registry import CPUDispatcher
@@ -138,32 +144,3 @@ def deshaw_jit(
         **kws,
         _target="DEShawJIT",
     )
-
-
-# from numba.core import event
-
-
-# class CustomListener(event.Listener):
-#     def on_start(self, event):
-#         print(f'[START] {event.data["py_func"].__name__} {event.kind}...')
-
-#     def on_end(self, event):
-#         print(f'[END] {event.data["py_func"].__name__} {event.kind}')
-
-
-# def int_jit(a):
-#     return isinstance(a, int)
-
-
-# @deshaw_jit(use_jit=int_jit)
-# def incr(a):
-#     return a + 1
-
-
-# listener = CustomListener()
-# with event.install_listener("jit_execution", listener):
-#     incr(1)
-
-# listener = CustomListener()
-# with event.install_listener("interpreter_execution", listener):
-#     incr(1.23)
