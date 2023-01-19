@@ -1,7 +1,7 @@
 """
 """
 
-__all__ = ["deshaw_jit"]
+__all__ = ["smart_jit", "smart_jit_events"]
 
 
 from typing import Callable
@@ -18,7 +18,7 @@ from numba import jit
 # numba.jit decorator which will decide whether to use the jit or not.
 # We currently do this manually in a number of places.
 
-de_events = dict(jit="jit_execution", interpreter="interpreter_execution")
+smart_jit_events = dict(jit="jit_execution", interpreter="interpreter_execution")
 
 
 class NumbaInterpreterModeWarning(errors.NumbaWarning):
@@ -27,7 +27,7 @@ class NumbaInterpreterModeWarning(errors.NumbaWarning):
     """
 
 
-class DEShawDispatcher(CPUDispatcher):
+class SmartJitDispatcher(CPUDispatcher):
     def _default_checker(*args, **kwargs):
         return True
 
@@ -41,7 +41,7 @@ class DEShawDispatcher(CPUDispatcher):
             Set to True to warn when jit compilation/execution falls back
             to interpreter mode. Default value is False
         """
-        self.use_jit = targetoptions.pop("use_jit", DEShawDispatcher._default_checker)
+        self.use_jit = targetoptions.pop("use_jit", SmartJitDispatcher._default_checker)
         self.warn_on_fallback = targetoptions.pop("warn_on_fallback", False)
         super().__init__(*args, targetoptions=targetoptions, **kwargs)
 
@@ -104,18 +104,18 @@ class DEShawDispatcher(CPUDispatcher):
         return self._run_jit_func(*args, **kwargs)
 
 
-class DEShawJIT(CPU):
+class SmartJIT(CPU):
     ...
 
 
-target_registry["DEShawJIT"] = DEShawJIT
+target_registry["SmartJitJIT"] = SmartJIT
 
 
-dispatcher_registry[target_registry["DEShawJIT"]] = DEShawDispatcher
+dispatcher_registry[target_registry["SmartJitJIT"]] = SmartJitDispatcher
 
 
-def deshaw_jit(
-    *args, use_jit=DEShawDispatcher._default_checker, warn_on_fallback=False, **kws
+def smart_jit(
+    *args, use_jit=SmartJitDispatcher._default_checker, warn_on_fallback=False, **kws
 ):
     """
     This decorator is used to compile a Python function into native code.
@@ -142,5 +142,5 @@ def deshaw_jit(
     return jit(
         *args,
         **kws,
-        _target="DEShawJIT",
+        _target="SmartJitJIT",
     )
