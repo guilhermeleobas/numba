@@ -2,7 +2,7 @@ import pytest
 import warnings
 import numpy as np
 from numba.core.event import install_listener, Listener, EventStatus
-from smart_jit import smart_jit, NumbaInterpreterModeWarning, smart_jit_events
+from smart_jit import smart_jit, Action, NumbaInterpreterModeWarning, smart_jit_events
 
 
 class CustomListener(Listener):
@@ -50,15 +50,17 @@ def sum_fast(A):
 
 def use_jit_sum_fast(A):
     # for small arrays, just interpret
-    return len(A) > 1_000
+    if len(A) > 1_000:
+        return Action.JIT
+    return Action.INTERPRETER
 
 
 def enable_jit(*args, **kwargs):
-    return True
+    return Action.JIT
 
 
-def disable_jit(*args, **kwargs):
-    return False
+def use_interpreter(*args, **kwargs):
+    return Action.INTERPRETER
 
 
 def check_listener(kind, listener, cfunc, args):
@@ -79,10 +81,10 @@ def check_compiler_listener(cfunc, args):
     return check_listener(smart_jit_events["jit"], listener, cfunc, args)
 
 
-@pytest.mark.parametrize("use_jit", [True, False, enable_jit, disable_jit])
+@pytest.mark.parametrize("use_jit", [enable_jit, use_interpreter])
 def test_use_jit(use_jit):
     cfunc = smart_jit(use_jit=use_jit)(add)
-    if use_jit in (False, disable_jit):
+    if use_jit in (False, use_interpreter):
         check_interpreter_listener(cfunc, (2, 3))
     else:
         check_compiler_listener(cfunc, (2, 3))
@@ -97,8 +99,8 @@ def test_use_jit_sum_fast(A):
         check_compiler_listener(cfunc, (A,))
 
 
-def test_disable_jit():
-    _jit = smart_jit("int64(int64, int64)", use_jit=disable_jit)
+def test_interpreter_action():
+    _jit = smart_jit("int64(int64, int64)", use_jit=use_interpreter)
     cfunc = _jit(add)
     check_interpreter_listener(cfunc, ("Hello, ", "World"))
 
@@ -108,14 +110,62 @@ def test_disable_jit():
 
 
 @pytest.mark.parametrize("inp", [(2, 3), (2.2, 4.4)])
-def test_disable_jit_with_signature(inp):
-    _jit = smart_jit("float64(float64, float64)", use_jit=disable_jit)
+def test_interpreter_action_with_signature(inp):
+    _jit = smart_jit("float64(float64, float64)", use_jit=use_interpreter)
     cfunc = _jit(add)
     check_compiler_listener(cfunc, inp)
 
     # Interpreter Listener should fail
     with pytest.raises(ListenerNotTriggeredException):
         check_interpreter_listener(cfunc, inp)
+
+
+def test_actions_combined():
+    def use_jit_func(a, b):
+        if isinstance(a, int) and isinstance(b, int):
+            # JIT compile for integers
+            return Action.JIT
+        elif isinstance(a, float) and isinstance(b, float):
+            # Interpreter for floats
+            return Action.INTERPRETER
+        else:
+            # raise exception otherwise
+            return Action.RAISE_EXCEPTION
+
+    _jit = smart_jit(use_jit=use_jit_func)
+    cfunc = _jit(add)
+
+    # calling cfunc with integers or floats works
+    check_compiler_listener(cfunc, (2, 4))
+    check_interpreter_listener(cfunc, (2.2, 4.4))
+
+    with pytest.raises(TypeError):
+        check_compiler_listener(cfunc, ("Hello, ", "World"))
+
+
+def test_actions_combined_with_jit_signature():
+    def use_jit_func(a, b):
+        if isinstance(a, int) and isinstance(b, int):
+            # This will not happen as a jit function for integers
+            # was previously compiled. Raising a RuntimeError to check if that
+            # is the case
+            raise RuntimeError()
+        elif isinstance(a, float) and isinstance(b, float):
+            # Run function in the interpreter
+            return Action.INTERPRETER
+        else:
+            # raise exception for other types
+            return Action.RAISE_EXCEPTION
+
+    _jit = smart_jit("int64(int64, int64)", use_jit=use_jit_func)
+    cfunc = _jit(add)
+
+    # calling cfunc with integers or floats works
+    check_compiler_listener(cfunc, (2, 4))
+    check_interpreter_listener(cfunc, (2.2, 4.4))
+
+    with pytest.raises(TypeError):
+        check_compiler_listener(cfunc, ("Hello, ", "World"))
 
 
 def test_invalid_call():
@@ -135,8 +185,8 @@ def test_no_warn_on_fallback():
 _options = [
     dict(nopython=True),
     dict(nopython=True, fastmath=True),
-    dict(nopython=True, fastmath=True, use_jit=True),
-    dict(nopython=True, fastmath=True, use_jit=False),
+    dict(nopython=True, fastmath=True, use_jit=enable_jit),
+    dict(nopython=True, fastmath=True, use_jit=use_interpreter),
 ]
 
 
