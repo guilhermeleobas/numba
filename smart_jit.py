@@ -40,7 +40,7 @@ class SmartJitDispatcher(CPUDispatcher):
 
     def __init__(self, *args, targetoptions, **kwargs):
         """
-        use_jit: Callable or bool
+        use_jit: Callable
             Custom logic passed to the dispatcher object which will decide
             whether to use the jit or not. Default is to always use jit.
 
