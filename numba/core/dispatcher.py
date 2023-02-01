@@ -730,6 +730,7 @@ class _DispatcherBase(_dispatcher.Dispatcher):
         # Not going through the resolve_argument_type() indirection
         # can save a couple µs.
         try:
+            print('typeof_pyval')
             tp = typeof(val, Purpose.argument)
         except ValueError:
             tp = types.pyobject

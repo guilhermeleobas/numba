@@ -114,6 +114,12 @@ NUMBA_GLOBAL_FUNC(int)
 numba_list_append(NB_List *lp, const char *item);
 
 NUMBA_GLOBAL_FUNC(int)
+numba_list_append_fastpath(NB_List *lp, const char *item);
+
+NUMBA_GLOBAL_FUNC(int)
+numba_list_new_from_iterable(NB_List *lp, const char *items);
+
+NUMBA_GLOBAL_FUNC(int)
 numba_list_resize(NB_List *lp, Py_ssize_t newsize);
 
 NUMBA_GLOBAL_FUNC(int)

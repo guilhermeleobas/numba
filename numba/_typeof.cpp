@@ -10,6 +10,8 @@
 #include "_devicearray.h"
 #include "pyerrors.h"
 
+#include <iostream>
+
 #define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
 #include <numpy/ndarrayobject.h>
 
@@ -609,6 +611,9 @@ typecode_using_fingerprint(PyObject *dispatcher, PyObject *val)
         if (PyErr_ExceptionMatches(PyExc_NotImplementedError)) {
             /* Can't compute a type fingerprint for the given value,
                fall back on typeof() without caching. */
+            // printf("------\n");
+            // PyObject_Print(val, stdout, Py_PRINT_RAW);
+            PyErr_Print();
             PyErr_Clear();
             return typecode_fallback(dispatcher, val);
         }
@@ -942,6 +947,11 @@ extern "C" int
 typeof_typecode(PyObject *dispatcher, PyObject *val)
 {
     PyTypeObject *tyobj = Py_TYPE(val);
+    printf("-=-=-=-\n");
+    const char *p = tyobj->tp_name;
+    std::cout << "My type is " << p << std::endl;
+    // PyObject_Print(tyobj, stdout, Py_PRINT_RAW);
+
     int subtype_attr;
     /* This needs to be kept in sync with Dispatcher.typeof_pyval(),
      * otherwise funny things may happen.

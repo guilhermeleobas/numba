@@ -322,6 +322,56 @@ numba_list_getitem(NB_List *lp, Py_ssize_t index, char *out) {
     return LIST_OK;
 }
 
+int
+numba_list_new_from_iterable(NB_List *lp, const char *items) {
+    char *loc;
+    // check for mutability
+    if (!lp->is_mutable) {
+        return LIST_ERR_IMMUTABLE;
+    }
+    // resize by one, will change list size
+    printf("size: %d\n", lp->size);
+    int result = numba_list_resize(lp, lp->size + 1);
+    if(result < LIST_OK) {
+        return result;
+    }
+    // insert item at index: original size before resize
+    loc = lp->items + lp->item_size * (lp->size - 1);
+    // copy_item(lp, loc, items);
+    char* dst = loc;
+    char* src = items;
+    memcpy(dst, src, lp->item_size * lp->allocated);
+    // list_incref_item(lp, loc);
+    // printf("%p\n", items);
+    return LIST_OK;
+}
+
+
+/* Append an item to the end of a list.
+ *
+ * lp: a list
+ * item: the item to append.
+ */
+int
+numba_list_append_fastpath(NB_List *lp, const char *item) {
+    char *loc;
+    // check for mutability
+    // if (!lp->is_mutable) {
+    //     return LIST_ERR_IMMUTABLE;
+    // }
+    // resize by one, will change list size
+    // int result = numba_list_resize(lp, lp->size + 1);
+    // if(result < LIST_OK) {
+    //     return result;
+    // }
+    // insert item at index: original size before resize
+    loc = lp->items + lp->item_size * (lp->size - 1);
+    copy_item(lp, loc, item);
+    // list_incref_item(lp, loc);
+    return LIST_OK;
+}
+
+
 /* Append an item to the end of a list.
  *
  * lp: a list

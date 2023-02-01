@@ -589,6 +589,120 @@ def _list_append(typingctx, l, item):
     return sig, codegen
 
 
+@intrinsic
+def _list_append_fast(typingctx, l, item):
+    """Wrap numba_list_append
+    """
+    resty = types.int32
+    sig = resty(l, l.item_type)
+
+    def codegen(context, builder, sig, args):
+        fnty = ir.FunctionType(
+            ll_status,
+            [ll_list_type, ll_bytes],
+        )
+        [l, item] = args
+        [tl, titem] = sig.args
+        fn = cgutils.get_or_insert_function(builder.module, fnty,
+                                            'numba_list_append_fast')
+
+        dm_item = context.data_model_manager[titem]
+
+        data_item = dm_item.as_data(builder, item)
+
+        ptr_item = cgutils.alloca_once_value(builder, data_item)
+
+        lp = _container_get_data(context, builder, tl, l)
+        status = builder.call(
+            fn,
+            [
+                lp,
+                _as_bytes(builder, ptr_item),
+            ],
+        )
+        return status
+
+    return sig, codegen
+
+
+@intrinsic
+def _new_from_iterable(typingctx, l, items):
+    """Wrap numba_list_append
+    """
+    resty = types.int32
+    sig = resty(l, items)
+
+    def codegen(context, builder, sig, args):
+        fnty = ir.FunctionType(
+            ll_status,
+            [ll_list_type, ll_bytes],
+        )
+        [l, items] = args
+        [tl, titems] = sig.args
+        fn = cgutils.get_or_insert_function(builder.module, fnty,
+                                            'numba_list_new_from_iterable')
+
+        dm_item = context.data_model_manager[titems]
+
+        data_item = dm_item.as_data(builder, items)
+
+        ptr_item = cgutils.alloca_once_value(builder, data_item)
+
+        lp = _container_get_data(context, builder, tl, l)
+        status = builder.call(
+            fn,
+            [
+                lp,
+                _as_bytes(builder, ptr_item),
+            ],
+        )
+        return status
+
+    return sig, codegen
+
+
+@overload_method(types.ListType, '_new_from_iterable')
+def impl_new_from_iterable(l, items):
+    if not isinstance(l, types.ListType):
+        return
+
+    itemty = l.item_type
+
+    def impl(l, items):
+        # casteditem = _cast(item, itemty)
+        status = _new_from_iterable(l, items)
+        if status == ListStatus.LIST_OK:
+            return
+        elif status == ListStatus.LIST_ERR_IMMUTABLE:
+            raise ValueError('list is immutable')
+        elif status == ListStatus.LIST_ERR_NO_MEMORY:
+            raise MemoryError('Unable to allocate memory to append item')
+        else:
+            raise RuntimeError('list.append failed unexpectedly')
+
+    return impl
+
+
+@overload_method(types.ListType, '_append_fast')
+def impl_append(l, item):
+    if not isinstance(l, types.ListType):
+        return
+
+    itemty = l.item_type
+
+    def impl(l, item):
+        status = _list_append(l, item)
+        if status == ListStatus.LIST_OK:
+            return
+        elif status == ListStatus.LIST_ERR_IMMUTABLE:
+            raise ValueError('list is immutable')
+        elif status == ListStatus.LIST_ERR_NO_MEMORY:
+            raise MemoryError('Unable to allocate memory to append item')
+        else:
+            raise RuntimeError('list.append failed unexpectedly')
+    return impl
+
+
 @overload_method(types.ListType, 'append')
 def impl_append(l, item):
     if not isinstance(l, types.ListType):

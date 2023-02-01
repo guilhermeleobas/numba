@@ -83,6 +83,16 @@ def _append(l, item):
 
 
 @njit
+def _append_fast(l, item):
+    l._append_fast(item)
+
+
+@njit
+def _new_from_iterable(l, items):
+    l._new_from_iterable(items)
+
+
+@njit
 def _setitem(l, i, item):
     l[i] = item
 
@@ -264,8 +274,12 @@ class List(MutableSequence, pt.Generic[T]):
                         iter(iterable)
                     except TypeError:
                         raise TypeError("List() argument must be iterable")
-                    for i in args[0]:
-                        self.append(i)
+                    if self._can_initialize_fastpath(iterable):
+                        print('using fastpath')
+                        self._initialise_list_fastpath(iterable)
+                    else:
+                        print('using slowpath')
+                        self._initialize_list_slowpath(iterable)
 
     def _parse_arg(self, lsttype, meminfo=None, allocated=DEFAULT_ALLOCATED):
         if not isinstance(lsttype, ListType):
@@ -295,9 +309,33 @@ class List(MutableSequence, pt.Generic[T]):
             raise RuntimeError("invalid operation on untyped list")
         return self._list_type.dtype
 
-    def _initialise_list(self, item):
+    def _initialise_list(self, item, allocated=DEFAULT_ALLOCATED):
         lsttype = types.ListType(typeof(item))
-        self._list_type, self._opaque = self._parse_arg(lsttype)
+        self._list_type, self._opaque = self._parse_arg(lsttype, allocated=allocated)
+
+    def _initialize_list_slowpath(self, items):
+        for item in items:
+            self.append(item)
+
+    def _initialise_list_fastpath(self, items):
+        item = items[0]
+        length = len(items)
+        self._initialise_list(item, allocated=length)
+        # self._initialise_list(item)
+
+        # self._new_from_iterable(items)
+        for item in items:
+            self.append_fast(item)
+        # for item in items:
+        #     self.append(item)
+
+    def _can_initialize_fastpath(self, iterable):
+        # Assumptions:
+        # args is homogeneous
+        # can compute the length
+        # return False
+        import os
+        return os.environ.get('USE_FASTPATH', False)
 
     def __len__(self) -> int:
         if not self._typed:
@@ -319,6 +357,9 @@ class List(MutableSequence, pt.Generic[T]):
 
     def _make_immutable(self):
         return _make_immutable(self)
+
+    def _new_from_iterable(self, items):
+        return _new_from_iterable(self, items)
 
     def __eq__(self, other):
         return _eq(self, other)
@@ -342,6 +383,11 @@ class List(MutableSequence, pt.Generic[T]):
         if not self._typed:
             self._initialise_list(item)
         _append(self, item)
+
+    def append_fast(self, item: T) -> None:
+        # if not self._typed:
+        #     self._initialise_list(item)
+        _append_fast(self, item)
 
     # noqa F811 comments required due to github.com/PyCQA/pyflakes/issues/592
     # noqa E704 required to follow overload style of using ... in the same line
@@ -427,6 +473,7 @@ class List(MutableSequence, pt.Generic[T]):
         return _sort(self, key, reverse)
 
     def __str__(self):
+        # return 'TypedList'
         buf = []
         for x in self:
             buf.append("{}".format(x))
