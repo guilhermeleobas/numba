@@ -215,7 +215,7 @@ def fold_arguments(pysig, args, kws, normal_handler, default_handler,
     bind_kws = kws.copy()
     if kwonly:
         for idx, n in enumerate(kwonly):
-            bind_kws[n] = args[len(kwonly) + idx]
+            bind_kws[n] = args[len(kwonly) + idx - 1]
 
     # now bind
     ba = pysig.bind(*bind_args, **bind_kws)
