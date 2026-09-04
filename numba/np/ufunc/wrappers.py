@@ -290,6 +290,33 @@ class UArrayArg(object):
 GufWrapperCache = make_library_cache('guf')
 
 
+class _KernelKeyedGufWrapperCache(GufWrapperCache):
+    """A gufunc wrapper cache keyed also by the kernel symbol it calls.
+
+    The wrapper's object code calls the kernel by its mangled name, which
+    carries a per-compilation ABI tag (the ``v<uid>`` produced by
+    ``itanium_mangler.mangle_identifier``).  The base index key --
+    ``(signature, target magic tuple, bytecode hash, closure hash)`` -- does
+    not mention that tag, so a wrapper built against one kernel symbol is an
+    entirely valid cache hit for a kernel that defines a *different* one.
+    Concurrent processes can write such a pair (see #10128): the wrapper then
+    calls a symbol nothing defines, ``get_pointer_to_function`` hands back
+    NULL and the process segfaults on first call.
+
+    Including the kernel symbol makes the pairing explicit, so a mismatch is
+    a cache miss and a recompile rather than a bad link.  This holds however
+    the ABI tag is generated -- it does not require the tag to be stable
+    across processes.
+    """
+
+    def __init__(self, py_func, kernel_symbol):
+        super().__init__(py_func)
+        self._kernel_symbol = kernel_symbol
+
+    def _index_key(self, sig, codegen):
+        return super()._index_key(sig, codegen) + (self._kernel_symbol,)
+
+
 class _GufuncWrapper(object):
     def __init__(self, py_func, cres, sin, sout, cache, is_parfors):
         """
@@ -303,7 +330,10 @@ class _GufuncWrapper(object):
         self.sin = sin
         self.sout = sout
         self.is_objectmode = self.signature.return_type == types.pyobject
-        self.cache = (GufWrapperCache(py_func=self.py_func)
+        # Keyed by the kernel symbol as well as the signature: the wrapper is
+        # only interchangeable with a kernel that defines the symbol it calls.
+        self.cache = (_KernelKeyedGufWrapperCache(self.py_func,
+                                                  self.fndesc.mangled_name)
                       if cache else NullCache())
         self.is_parfors = bool(is_parfors)
 

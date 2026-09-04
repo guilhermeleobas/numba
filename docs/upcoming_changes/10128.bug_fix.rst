@@ -1,0 +1,19 @@
+Fix race condition in GUFunc caching that can cause segfaults
+-------------------------------------------------------------
+
+Fixed a race condition where concurrent processes compiling the same
+``@guvectorize`` functions could produce inconsistent cache files, leading to
+segfaults.
+
+A ``@guvectorize`` function is cached as two independent artifacts: the kernel
+(``.nbc``) and the generated NumPy wrapper (``guf-*.nbc``). The wrapper calls
+the kernel by its mangled symbol name, which carries a per-compilation ABI tag,
+but the wrapper's cache key did not include that symbol. A wrapper built
+against one kernel symbol was therefore a valid cache hit for a kernel defining
+a different one; the resulting pair left the wrapper calling an undefined
+symbol, which resolved to a null pointer and segfaulted on the first call.
+
+The kernel symbol is now part of the wrapper's cache key, so a mismatched pair
+is a cache miss and a recompile rather than a bad link. Building a ufunc entry
+point from an unresolved symbol now raises ``RuntimeError`` instead of handing
+a null function pointer to NumPy.
